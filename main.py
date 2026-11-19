@@ -8,6 +8,11 @@ from datetime import datetime, timezone
 from database import engine, SessionLocal
 from models import Message, User
 
+import os
+import hmac
+from fastapi import Header, HTTPException
+from sqlalchemy import text
+
 app = FastAPI()
 
 app.add_middleware(
@@ -377,3 +382,29 @@ def get_messages(user1: str, user2: str):
 
     finally:
         db.close()
+
+    
+@app.post("/admin/reset-database")
+def reset_database(x_reset_token: str = Header(default="")):
+    expected_token = os.getenv("RESET_TOKEN")
+
+    if not expected_token:
+        raise HTTPException(
+            status_code=503,
+            detail="Reset token is not configured"
+        )
+
+    if not hmac.compare_digest(x_reset_token, expected_token):
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid reset token"
+        )
+
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM messages"))
+        connection.execute(text("DELETE FROM users"))
+
+    return {
+        "message": "Live database cleared successfully!"
+    }
+
