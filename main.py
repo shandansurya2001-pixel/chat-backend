@@ -2,16 +2,16 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, text
+from sqlalchemy import or_
 from datetime import datetime, timezone
 
-from database import engine, SessionLocal
+from database import engine, SessionLocal, Base
 from models import Message, User
-
 
 
 app = FastAPI()
 
+# Allow frontend connection
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,40 +20,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create tables without deleting existing messages
-User.metadata.create_all(bind=engine)
-
-# Add last_seen column to an existing users table
-
-# Safely update existing database columns
-with engine.begin() as connection:
-
-    # Add last_seen to users table if missing
-    user_columns = [
-        row[1]
-        for row in connection.exec_driver_sql(
-            "PRAGMA table_info(users)"
-        ).fetchall()
-    ]
-
-    if "last_seen" not in user_columns:
-        connection.execute(
-            text("ALTER TABLE users ADD COLUMN last_seen DATETIME")
-        )
-
-    # Add timestamp to messages table if missing
-    message_columns = [
-        row[1]
-        for row in connection.exec_driver_sql(
-            "PRAGMA table_info(messages)"
-        ).fetchall()
-    ]
-
-    if "timestamp" not in message_columns:
-        connection.execute(
-            text("ALTER TABLE messages ADD COLUMN timestamp DATETIME")
-        )
-
+# Create database tables automatically
+# Works with both SQLite and PostgreSQL
+Base.metadata.create_all(bind=engine)
 
 
 # Active users: username -> WebSocket
@@ -204,7 +173,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if not username:
                     continue
 
-                # Use the registered username, not a client-supplied sender
+                # Use registered username, not client-supplied sender
                 receiver = data.get("receiver", "").strip()
                 message_text = data.get("text", "").strip()
 
@@ -228,7 +197,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     new_message = Message(
                         sender=username,
                         receiver=receiver,
-                        text=message_text
+                        text=message_text,
+                        timestamp=datetime.now(timezone.utc).replace(
+                            tzinfo=None
+                        )
                     )
 
                     db.add(new_message)
@@ -379,6 +351,3 @@ def get_messages(user1: str, user2: str):
 
     finally:
         db.close()
-
-    
-
